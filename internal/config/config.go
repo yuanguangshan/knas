@@ -24,6 +24,7 @@ type SSHConfig struct {
 
 type ClipboardConfig struct {
 	MinLength     int      `json:"min_length"`
+	MaxLength     int      `json:"max_length"`
 	PollInterval  int      `json:"poll_interval_ms"`
 	ExcludeWords  []string `json:"exclude_words"`
 }
@@ -145,6 +146,7 @@ func DefaultConfig() *Config {
 		},
 		Clipboard: ClipboardConfig{
 			MinLength:     100,
+			MaxLength:     1024 * 1024, // 1MB
 			PollInterval:  500,
 			ExcludeWords:  []string{"password", "密码", "token"},
 		},

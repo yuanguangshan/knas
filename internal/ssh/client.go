@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"unicode"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 type Config struct {
@@ -54,12 +57,49 @@ func (c *Client) Connect() error {
 		return fmt.Errorf("unable to parse private key: %w", err)
 	}
 
+	// 创建 known_hosts 文件路径
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
+	}
+	knownHostsPath := filepath.Join(homeDir, ".knas", "known_hosts")
+
+	// 确保 .knas 目录存在
+	if err := os.MkdirAll(filepath.Join(homeDir, ".knas"), 0755); err != nil {
+		return fmt.Errorf("failed to create .knas directory: %w", err)
+	}
+
+	// 创建 known_hosts 回调函数
+	hostKeyCallback, err := knownhosts.New(knownHostsPath)
+	if err != nil {
+		// 如果文件不存在或格式错误，创建一个新的
+		if os.IsNotExist(err) || strings.Contains(err.Error(), "unknown key") {
+			// 使用一个宽松的回调来首次连接，然后保存主机密钥
+			hostKeyCallback = ssh.HostKeyCallback(func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+				khPath := knownHostsPath
+				line := knownhosts.Line([]string{hostname}, key)
+				f, err := os.OpenFile(khPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+				if err != nil {
+					return fmt.Errorf("failed to open known_hosts: %w", err)
+				}
+				defer f.Close()
+				if _, err := f.WriteString(line + "\n"); err != nil {
+					return fmt.Errorf("failed to write to known_hosts: %w", err)
+				}
+				log.Printf("[INFO] Added host key for %s to known_hosts", hostname)
+				return nil
+			})
+		} else {
+			return fmt.Errorf("failed to create known_hosts callback: %w", err)
+		}
+	}
+
 	config := &ssh.ClientConfig{
 		User: c.config.User,
 		Auth: []ssh.AuthMethod{
 			ssh.PublicKeys(signer),
 		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: hostKeyCallback,
 		Timeout:         10 * time.Second,
 	}
 

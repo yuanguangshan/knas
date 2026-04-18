@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/atotto/clipboard"
+	"github.com/yuanguangshan/knas/internal/fetcher"
 )
 
 type ClipboardItem struct {
@@ -22,6 +23,7 @@ type Monitor struct {
 	lastHash      string
 	lastContent   string
 	minLength     int
+	maxLength     int
 	stopChan      chan struct{}
 	wg            sync.WaitGroup
 	itemChan      chan ClipboardItem
@@ -31,6 +33,7 @@ type Monitor struct {
 
 type MonitorConfig struct {
 	MinLength     int
+	MaxLength     int
 	PollInterval  time.Duration
 	ExcludeWords  []string
 	BufferSize    int
@@ -39,6 +42,9 @@ type MonitorConfig struct {
 func NewMonitor(config MonitorConfig) *Monitor {
 	if config.MinLength == 0 {
 		config.MinLength = 100
+	}
+	if config.MaxLength == 0 {
+		config.MaxLength = 1024 * 1024 // 1MB 默认值
 	}
 	if config.PollInterval == 0 {
 		config.PollInterval = 500 * time.Millisecond
@@ -49,6 +55,7 @@ func NewMonitor(config MonitorConfig) *Monitor {
 
 	return &Monitor{
 		minLength:    config.MinLength,
+		maxLength:    config.MaxLength,
 		pollInterval: config.PollInterval,
 		excludeWords: config.ExcludeWords,
 		stopChan:     make(chan struct{}),
@@ -64,6 +71,12 @@ func (m *Monitor) hashContent(content string) string {
 func (m *Monitor) shouldSync(content string) bool {
 	// 检查长度
 	if len(content) < m.minLength {
+		return false
+	}
+
+	// 检查最大长度
+	if len(content) > m.maxLength {
+		log.Printf("[DEBUG] Content too large: %d bytes (max: %d)", len(content), m.maxLength)
 		return false
 	}
 
@@ -117,8 +130,20 @@ func (m *Monitor) Start() {
 					m.lastHash = m.hashContent(content)
 					m.lastContent = content
 
+					// 如果是 URL，尝试抓取标题
+					enhancedContent := content
+					if fetcher.IsURL(content) {
+						title, err := fetcher.FetchTitle(content)
+						if err == nil && title != "" {
+							enhancedContent = fmt.Sprintf("%s\n\n%s", content, title)
+							log.Printf("[INFO] Fetched title for URL: %s", title)
+						} else {
+							log.Printf("[DEBUG] Failed to fetch title: %v", err)
+						}
+					}
+
 					item := ClipboardItem{
-						Content:   content,
+						Content:   enhancedContent,
 						Timestamp: time.Now(),
 						Hash:      m.lastHash,
 					}
