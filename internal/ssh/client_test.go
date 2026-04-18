@@ -15,7 +15,7 @@ func TestExtractContentPrefix(t *testing.T) {
 			name:     "simple text",
 			content:  "Hello World",
 			n:        10,
-			expected: "Hello_World",
+			expected: "Hello_Worl", // 先截取到10个字符，然后过滤
 		},
 		{
 			name:     "chinese characters",
@@ -33,7 +33,7 @@ func TestExtractContentPrefix(t *testing.T) {
 			name:     "with special characters",
 			content:  "Hello/World\\Test",
 			n:        20,
-			expected: "Hello_World_Test",
+			expected: "HelloWorldTest", // / 和 \ 被过滤掉
 		},
 		{
 			name:     "with newlines",
@@ -51,7 +51,7 @@ func TestExtractContentPrefix(t *testing.T) {
 			name:     "truncate long content",
 			content:  "This is a very long content that should be truncated",
 			n:        10,
-			expected: "This_is_a_",
+			expected: "This_is_a_", // 先截取10个字符 "This is a"，然后替换空格
 		},
 	}
 

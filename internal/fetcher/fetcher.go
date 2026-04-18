@@ -62,15 +62,15 @@ func FetchTitle(url string) (string, error) {
 
 // extractTitle 从 HTML 中提取标题
 func extractTitle(html string) string {
-	// 简单的正则匹配 <title> 标签
-	titleRegex := regexp.MustCompile(`(?i)<title[^>]*>(.*?)</title>`)
+	// 简单的正则匹配 <title> 标签，使用 (?s) 让 . 匹配换行符
+	titleRegex := regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
 	matches := titleRegex.FindStringSubmatch(html)
 	if len(matches) < 2 {
 		return ""
 	}
 
 	title := strings.TrimSpace(matches[1])
-	// 移除 HTML 实体和多余空白
+	// 移除 HTML 实体和多余空白（包括换行符）
 	title = regexp.MustCompile(`\s+`).ReplaceAllString(title, " ")
 	title = strings.TrimSpace(title)
 

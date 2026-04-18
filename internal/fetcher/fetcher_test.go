@@ -123,8 +123,8 @@ func TestExtractTitle(t *testing.T) {
 		},
 		{
 			name:     "title with newlines",
-			input:    `<html><head><title>Line1\nLine2</title></head></html>`,
-			expected: "Line1\nLine2", // 实际实现保留了换行符
+			input:    "<html><head><title>Line1\nLine2</title></head></html>",
+			expected: "Line1 Line2", // 换行符应该被替换为空格
 		},
 	}
 
