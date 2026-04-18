@@ -15,11 +15,12 @@ type Config struct {
 }
 
 type SSHConfig struct {
-	Host     string `json:"host"`
-	Port     string `json:"port"`
-	User     string `json:"user"`
-	KeyPath  string `json:"key_path"`
-	BasePath string `json:"base_path"`
+	Host                 string `json:"host"`
+	Port                 string `json:"port"`
+	User                 string `json:"user"`
+	KeyPath              string `json:"key_path"`
+	BasePath             string `json:"base_path"`
+	FilenamePrefixLength int    `json:"filename_prefix_length"`
 }
 
 type ClipboardConfig struct {
@@ -138,11 +139,12 @@ func Save(config *Config) error {
 func DefaultConfig() *Config {
 	return &Config{
 		SSH: SSHConfig{
-			Host:     "",
-			Port:     "22",
-			User:     "root",
-			KeyPath:  "~/.ssh/id_rsa",
-			BasePath: "~/knas_archive",
+			Host:                 "",
+			Port:                 "22",
+			User:                 "root",
+			KeyPath:              "~/.ssh/id_rsa",
+			BasePath:             "~/knas_archive",
+			FilenamePrefixLength: 20, // 默认使用前 20 个字符
 		},
 		Clipboard: ClipboardConfig{
 			MinLength:     100,
