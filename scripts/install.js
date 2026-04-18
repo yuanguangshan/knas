@@ -6,23 +6,42 @@ const path = require('path');
 
 console.log('Installing knas...\n');
 
-// 检查 Go 环境
-try {
-  execSync('go version', { stdio: 'pipe' });
-  console.log('✓ Go environment found');
-} catch (e) {
-  console.error('✗ Go is not installed');
-  console.error('Please install Go from https://golang.org/dl/');
-  process.exit(1);
-}
+// 检查二进制文件是否已存在
+const binDir = path.join(__dirname, '../bin');
+const platform = process.platform;
+const arch = process.arch;
+const binaryName = platform === 'darwin' && arch === 'arm64'
+  ? 'knas-darwin-arm64'
+  : platform === 'darwin'
+  ? 'knas-darwin'
+  : platform === 'linux'
+  ? 'knas-linux'
+  : null;
 
-// 运行构建
-console.log('\nBuilding binaries...');
-try {
-  execSync('node scripts/build.js', { stdio: 'inherit' });
-} catch (e) {
-  console.error('✗ Build failed');
-  process.exit(1);
+const binaryPath = binaryName ? path.join(binDir, binaryName) : null;
+const binaryExists = binaryPath && fs.existsSync(binaryPath);
+
+if (binaryExists) {
+  console.log('✓ Pre-built binary found');
+} else {
+  // 检查 Go 环境
+  try {
+    execSync('go version', { stdio: 'pipe' });
+    console.log('✓ Go environment found');
+  } catch (e) {
+    console.error('✗ Go is not installed and no pre-built binary found');
+    console.error('Please install Go from https://golang.org/dl/');
+    process.exit(1);
+  }
+
+  // 运行构建
+  console.log('\nBuilding binaries...');
+  try {
+    execSync('node scripts/build.js', { stdio: 'inherit' });
+  } catch (e) {
+    console.error('✗ Build failed');
+    process.exit(1);
+  }
 }
 
 console.log('\n✓ Installation complete!');
