@@ -1,0 +1,255 @@
+package ssh
+
+import (
+	"bytes"
+	"fmt"
+	"io/ioutil"
+	"log"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"time"
+	"unicode"
+
+	"golang.org/x/crypto/ssh"
+)
+
+type Config struct {
+	Host     string
+	Port     string
+	User     string
+	KeyPath  string
+	BasePath string
+}
+
+type Client struct {
+	config     *Config
+	sshClient  *ssh.Client
+	connected  bool
+}
+
+func NewClient(config *Config) *Client {
+	if config.Port == "" {
+		config.Port = "22"
+	}
+	if config.BasePath == "" {
+		config.BasePath = "~/knas_archive"
+	}
+
+	return &Client{
+		config: config,
+	}
+}
+
+func (c *Client) Connect() error {
+	log.Printf("[INFO] Connecting to %s@%s:%s", c.config.User, c.config.Host, c.config.Port)
+
+	key, err := ioutil.ReadFile(c.config.KeyPath)
+	if err != nil {
+		return fmt.Errorf("unable to read private key: %w", err)
+	}
+
+	signer, err := ssh.ParsePrivateKey(key)
+	if err != nil {
+		return fmt.Errorf("unable to parse private key: %w", err)
+	}
+
+	config := &ssh.ClientConfig{
+		User: c.config.User,
+		Auth: []ssh.AuthMethod{
+			ssh.PublicKeys(signer),
+		},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         10 * time.Second,
+	}
+
+	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:%s", c.config.Host, c.config.Port), config)
+	if err != nil {
+		return fmt.Errorf("failed to dial: %w", err)
+	}
+
+	c.sshClient = client
+	c.connected = true
+
+	log.Println("[INFO] SSH connection established")
+	return nil
+}
+
+func (c *Client) Disconnect() error {
+	if c.sshClient != nil {
+		err := c.sshClient.Close()
+		c.connected = false
+		return err
+	}
+	return nil
+}
+
+func (c *Client) IsConnected() bool {
+	return c.connected
+}
+
+func (c *Client) expandPath(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		return "/home/" + c.config.User + path[1:]
+	}
+	return path
+}
+
+func (c *Client) MkdirAll(path string) error {
+	session, err := c.sshClient.NewSession()
+	if err != nil {
+		return fmt.Errorf("failed to create session: %w", err)
+	}
+	defer session.Close()
+
+	fullPath := c.expandPath(path)
+	cmd := fmt.Sprintf("mkdir -p %s", fullPath)
+
+	var stdout, stderr bytes.Buffer
+	session.Stdout = &stdout
+	session.Stderr = &stderr
+
+	err = session.Run(cmd)
+	if err != nil {
+		return fmt.Errorf("failed to create directory: %s, stderr: %s", err, stderr.String())
+	}
+
+	return nil
+}
+
+func (c *Client) WriteFile(path string, content string) error {
+	session, err := c.sshClient.NewSession()
+	if err != nil {
+		return fmt.Errorf("failed to create session: %w", err)
+	}
+	defer session.Close()
+
+	fullPath := c.expandPath(path)
+	// 使用 cat 命令写入文件，避免特殊字符问题
+	cmd := fmt.Sprintf("cat > %s", fullPath)
+
+	stdin, err := session.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("failed to get stdin pipe: %w", err)
+	}
+
+	var stderr bytes.Buffer
+	session.Stderr = &stderr
+
+	if err := session.Start(cmd); err != nil {
+		return fmt.Errorf("failed to start command: %w", err)
+	}
+
+	if _, err := fmt.Fprint(stdin, content); err != nil {
+		return fmt.Errorf("failed to write to stdin: %w", err)
+	}
+
+	if err := stdin.Close(); err != nil {
+		return fmt.Errorf("failed to close stdin: %w", err)
+	}
+
+	if err := session.Wait(); err != nil {
+		return fmt.Errorf("command failed: %s, stderr: %s", err, stderr.String())
+	}
+
+	return nil
+}
+
+func (c *Client) SyncItem(content string, timestamp time.Time) error {
+	// 生成路径：~/knas_archive/YYYY/MM/DD/HHMMSS_前10字符.md
+	year := timestamp.Format("2006")
+	month := timestamp.Format("01")
+	day := timestamp.Format("02")
+	timeStr := timestamp.Format("150405")
+
+	// 提取前10个字符作为文件名
+	prefix := extractContentPrefix(content, 10)
+
+	relPath := filepath.Join(year, month, day)
+	fileName := fmt.Sprintf("%s_%s.md", timeStr, prefix)
+	fullPath := filepath.Join(c.config.BasePath, relPath, fileName)
+
+	// 创建目录
+	if err := c.MkdirAll(filepath.Join(c.config.BasePath, relPath)); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	// 准备文件内容
+	fileContent := c.formatContent(content, timestamp)
+
+	// 写入文件
+	if err := c.WriteFile(fullPath, fileContent); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+
+	log.Printf("[INFO] Synced to remote: %s", fullPath)
+	return nil
+}
+
+// extractContentPrefix 提取内容的前 n 个字符，清理特殊字符
+func extractContentPrefix(content string, n int) string {
+	// 清理内容：移除空白字符、换行等
+	content = strings.TrimSpace(content)
+	content = regexp.MustCompile(`\s+`).ReplaceAllString(content, " ")
+
+	// 提取前 n 个字符
+	runes := []rune(content)
+	if len(runes) > n {
+		runes = runes[:n]
+	}
+
+	// 只保留字母、数字、中文和常见符号
+	var result []rune
+	for _, r := range runes {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.Is(unicode.Han, r) ||
+			r == '_' || r == '-' || r == ' ' {
+			result = append(result, r)
+		}
+	}
+
+	prefix := string(result)
+	// 移除空格
+	prefix = strings.ReplaceAll(prefix, " ", "_")
+	prefix = strings.ReplaceAll(prefix, "/", "_")
+	prefix = strings.ReplaceAll(prefix, "\\", "_")
+
+	if len(prefix) == 0 {
+		return "untitled"
+	}
+
+	return prefix
+}
+
+func (c *Client) formatContent(content string, timestamp time.Time) string {
+	return fmt.Sprintf(`---
+sync_time: %s
+source: clipboard
+---
+
+%s`,
+		timestamp.Format("2006-01-02 15:04:05"),
+		content)
+}
+
+func (c *Client) TestConnection() error {
+	if !c.connected {
+		return fmt.Errorf("not connected")
+	}
+
+	session, err := c.sshClient.NewSession()
+	if err != nil {
+		return fmt.Errorf("failed to create session: %w", err)
+	}
+	defer session.Close()
+
+	output, err := session.Output("echo 'connection test'")
+	if err != nil {
+		return fmt.Errorf("connection test failed: %w", err)
+	}
+
+	if strings.TrimSpace(string(output)) != "connection test" {
+		return fmt.Errorf("unexpected output: %s", output)
+	}
+
+	return nil
+}
