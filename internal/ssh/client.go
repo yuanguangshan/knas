@@ -196,14 +196,14 @@ func (c *Client) WriteFile(path string, content string) error {
 }
 
 func (c *Client) SyncItem(content string, timestamp time.Time) error {
-	// 生成路径：~/knas_archive/YYYY/MM/DD/HHMMSS_前10字符.md
+	// 生成路径：~/knas_archive/YYYY/MM/DD/HHMMSS_前20字符.md
 	year := timestamp.Format("2006")
 	month := timestamp.Format("01")
 	day := timestamp.Format("02")
 	timeStr := timestamp.Format("150405")
 
-	// 提取前10个字符作为文件名
-	prefix := extractContentPrefix(content, 10)
+	// 提取前20个字符作为文件名
+	prefix := extractContentPrefix(content, 20)
 
 	relPath := filepath.Join(year, month, day)
 	fileName := fmt.Sprintf("%s_%s.md", timeStr, prefix)
